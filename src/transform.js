@@ -243,6 +243,14 @@ export function buildPhotoIndex(json) {
       items,
     });
   }
+  // Real Rista shape: photos are in the top-level items[] (not in displayBooks)
+  const flat = [];
+  for (const it of asList(root.items ?? root.data?.items)) {
+    const url = httpsUrl(it.imageURL ?? it.imageUrl ?? it.image);
+    if (!url) continue;
+    for (const k of [it.skuCode, it.itemId, it.sku]) { const id = idOf(k); if (id) flat.push([lc(id), url]); }
+  }
+  if (flat.length) out.push({ branchCodes: [], channels: [], items: flat });
   return out;
 }
 

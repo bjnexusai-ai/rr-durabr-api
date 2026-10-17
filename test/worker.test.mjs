@@ -95,7 +95,7 @@ test('menu: NO prices, categories by id and order, variants grouped, veg from ta
   _clear(); globalThis.fetch = fakeRista();
   const r = await get('/api/menu?branch=MR');
   assert.equal(r.status, 200);
-  const text = await r.text();
+  const text = (await r.text()).replace(/"generatedAt":"[^"]*"/, '"generatedAt":"x"');
   for (const bad of ['price', 'percentage', 'chargeRate', '199', '299', '179', '249', '777', '"33"', ':22', ':51']) assert.ok(!text.includes(bad), `leaked: ${bad}`);
   const j = JSON.parse(text);
   assert.equal(j.soldOutSource, 'stockStatus');

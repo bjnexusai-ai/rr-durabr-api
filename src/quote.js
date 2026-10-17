@@ -38,17 +38,20 @@ export function makeQuote(catalogJson, sold, items) {
     if (sold && row.keys.some((k) => k && sold.has(lc(k)))) { lines.push({ ...base, ok: false, reason: 'sold_out' }); continue; }
     const unit = Math.round(row.price * 100);
     const lineTotal = unit * qty;
-    const lineTax = 0;   // no GST added by the website (decision: item prices only)
-    subtotal += lineTotal; tax += lineTax;
-    lines.push({ ...base, ok: true, unitPrice: rupees(unit), lineTotal: rupees(lineTotal) });
+    // GST follows Rista, dish by dish. Price WITHOUT tax: add the tax. Price WITH tax: do not add it, only show how much of it is tax.
+    let part;
+    if (row.inc) { part = lineTotal - Math.round((lineTotal * 100) / (100 + row.taxPct)); subtotal += lineTotal - part; }
+    else { part = Math.round((lineTotal * row.taxPct) / 100); subtotal += lineTotal; }
+    tax += part;
+    lines.push({ ...base, ok: true, unitPrice: rupees(unit), lineTotal: rupees(lineTotal), taxIncluded: row.inc });
   }
 
   return {
     lines,
     allOk: lines.every((l) => l.ok),
     subtotal: rupees(subtotal),
-    tax: rupees(tax),            // GST from the tax rates saved in Rista for each dish (prices there are WITHOUT tax)
+    tax: rupees(tax),            // GST from the tax rates saved in Rista for each dish
     total: rupees(subtotal + tax),
-    taxIncluded: false,
+    taxIncluded: lines.some((l) => l.ok) && lines.filter((l) => l.ok).every((l) => l.taxIncluded),
   };
 }

@@ -409,6 +409,7 @@ export function priceIndex(catalogJson) {
       label: asList(node.variantValues).map((v) => str(v.value)).filter(Boolean).join(' '),
       price: price !== null && price > 0 ? price : null,
       taxPct,
+      inc: node.isPriceIncludesTax === true,   // Rista: this dish's price already contains the tax
       keys: [id, str(node.skuCode), str(node.sku), str(node.itemId), name],
     });
   }

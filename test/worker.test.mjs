@@ -108,7 +108,7 @@ test('menu: NO prices, categories by id and order, variants grouped, veg from ta
   assert.equal(chicken.veg, false);
   assert.equal(chicken.subCategory, 'Dum');
   assert.equal(chicken.spice, 'high'); assert.equal(chicken.prepMins, 25); assert.equal(chicken.serves, 1);
-  assert.deepEqual(chicken.variants, [{ id: 'B1H', label: 'Half', soldOut: false }, { id: 'B1F', label: 'Full', soldOut: true }]);
+  assert.deepEqual(chicken.variants, [{ id: 'B1H', label: 'Half', soldOut: false, orderable: true }, { id: 'B1F', label: 'Full', soldOut: true, orderable: true }]);
   assert.equal(chicken.soldOut, false);                                            // only Full is sold out
   assert.equal(j.categories[1].items[0].name, 'Chicken 65');
 });

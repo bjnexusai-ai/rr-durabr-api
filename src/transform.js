@@ -1,7 +1,7 @@
 // Turns raw Rista replies into SAFE data for the website.
-// Rule: we copy only fields we choose (a whitelist). Prices are never copied.
+// Rule: we copy only fields we choose (a whitelist). Prices are never copied into the menu reply.
+// Prices are used only inside the Worker, by priceIndex() for /api/quote.
 // Shapes follow the official Rista Platform API docs (GET /branch/list, /branch, /catalog, /stockStatus).
-// Readers are still tolerant (a few extra field names) because no real reply has been seen yet.
 
 const lc = (s) => String(s ?? '').trim().toLowerCase();
 const num = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -271,10 +271,23 @@ export function photosFor(index, code, channel) {
   return map;
 }
 
+/* Rows that are never a dish: inactive / deleted, add-ons, and the "Group" header row.
+   A Group row (type "Group", no price) is only the title of a Half/Full set. The real,
+   priced rows are its "Variant" children. Showing the Group row made every Half/Full dish appear twice. */
+function skipNode(node) {
+  const status = lc(node.status);
+  if (node.isActive === false || node.isDeleted === true || status.includes('inactive') || status.includes('delet') || status.includes('disab')) return true;
+  const type = lc(node.type);
+  if (/add[\s-]?on/.test(type)) return true;
+  if (type === 'group') return true;
+  if (type === 'option') return true;
+  return false;
+}
+
 export function buildMenu(catalogJson, sold, photos = null) {
   const root = catalogJson && typeof catalogJson === 'object' && !Array.isArray(catalogJson) ? catalogJson : {};
   const docShape = Array.isArray(root.items);          // real Rista shape: flat items[] + separate categories[]
-  const cats = new Map(), subs = new Map(), tags = new Map();
+  const cats = new Map(), subs = new Map(), tags = new Map(), byItemId = new Map();
 
   if (docShape) {
     for (const c of asList(root.categories)) {
@@ -284,6 +297,7 @@ export function buildMenu(catalogJson, sold, photos = null) {
       for (const s of asList(c.subCategories)) { const sid = idOf(s.subCategoryId); if (sid) subs.set(sid, str(s.name)); }
     }
     for (const t of asList(root.itemTags)) { const id = idOf(t.itemTagId); if (id) tags.set(id, str(t.name)); }
+    for (const n of asList(root.items)) { const i = idOf(n.itemId); if (i) byItemId.set(i, n); }
   }
 
   const raw = docShape ? asList(root.items).map((node) => ({ node, category: '' })) : extractItems(catalogJson);
@@ -291,13 +305,13 @@ export function buildMenu(catalogJson, sold, photos = null) {
   const members = [];
   const seen = new Set();
   raw.forEach(({ node, category }, index) => {
-    const status = lc(node.status);
-    if (node.isActive === false || node.isDeleted === true || status.includes('inactive') || status.includes('delet') || status.includes('disab')) return;
-    if (/add[\s-]?on/.test(lc(node.type))) return;      // add-ons are extras, not dishes
+    if (skipNode(node)) return;
     const id = itemId(node), name = itemName(node);
     if (!id || !name || seen.has(id)) return;
     seen.add(id);
     const c = cats.get(idOf(node.categoryId));
+    const parent = byItemId.get(idOf(node.groupItemId)) || null;      // the Group header row of a Half/Full set
+    const photoKeys = [node.itemId, node.skuCode, node.sku, id, node.groupItemId, parent?.skuCode, parent?.sku].map(idOf).filter(Boolean);
     members.push({
       node, id, name, index,
       label: asList(node.variantValues).map((v) => str(v.value)).filter(Boolean).join(' '),
@@ -307,8 +321,11 @@ export function buildMenu(catalogJson, sold, photos = null) {
       catImage: c?.image ?? null,
       sub: subs.get(idOf(node.subCategoryId)) || '',
       order: num(node.displayOrder),
+      priced: (num(node.price) ?? 0) > 0,
       sold: sold ? [id, str(node.skuCode), str(node.sku), str(node.itemId), name].some((v) => v && sold.has(lc(v))) : false,
-      photo: imageOf(node) || (photos ? [node.itemId, node.skuCode, node.sku, id].map(idOf).filter(Boolean).map((k) => photos.get(lc(k))).find(Boolean) || null : null),
+      photo: imageOf(node) || (parent ? imageOf(parent) : null) || (photos ? photoKeys.map((k) => photos.get(lc(k))).find(Boolean) || null : null),
+      tagIds: node.itemTagIds || parent?.itemTagIds,
+      desc: [node.description, node.itemDescription, parent?.description],
     });
   });
 
@@ -335,18 +352,19 @@ export function buildMenu(catalogJson, sold, photos = null) {
         id: first.id,
         name: multi ? stripVariant(first.name, first.label) : first.name,
         key: (multi ? stripVariant(first.name, first.label) : first.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), // for matching local photos
-        description: str(...g.flatMap((m) => [m.node.description, m.node.itemDescription])),
+        description: str(...g.flatMap((m) => m.desc)),
         subCategory: first.sub,
-        veg: vegFromTags(first.node.itemTagIds, tags) ?? vegFlag(first.node),
+        veg: vegFromTags(g.map((m) => m.tagIds).find(Boolean), tags) ?? vegFlag(first.node),
         image: own || first.catImage || null,
         imageSource: own ? 'rista' : first.catImage ? 'category' : 'none',   // client photos are matched on the page by item.key
         spice: spice && spice !== 'nonspicy' ? spice : null,
         serves: num(x.serves),
         prepMins: num(x.preparationTime),
         variants: multi
-          ? g.map((m) => ({ id: m.id, label: m.label || m.name, soldOut: m.sold }))
-          : legacyVariants(first.node).map((label) => ({ id: first.id, label, soldOut: first.sold })),
+          ? g.map((m) => ({ id: m.id, label: m.label || m.name, soldOut: m.sold, orderable: m.priced }))
+          : legacyVariants(first.node).map((label) => ({ id: first.id, label, soldOut: first.sold, orderable: first.priced })),
         soldOut: multi ? g.every((m) => m.sold) : first.sold,
+        orderable: multi ? g.some((m) => m.priced) : first.priced,   // false = no Website price in Rista: show it, but it cannot be added to a cart
       },
     });
   }
@@ -367,4 +385,32 @@ export function buildMenu(catalogJson, sold, photos = null) {
       items: c.items.sort((a, b) => cmp(a.order ?? Infinity, b.order ?? Infinity) || cmp(a.index, b.index)).map((d) => d.item),
     }));
   return { categories, count: categories.reduce((n, c) => n + c.items.length, 0) };
+}
+
+/* ---------- prices (Worker only, never sent as a menu) : used by /api/quote ---------- */
+// Same rows and same ids as buildMenu, so an id the site got from /api/menu is found here.
+// Returns Map(id -> { id, rista, name, label, price, taxPct, keys:[...] })
+export function priceIndex(catalogJson) {
+  const root = catalogJson && typeof catalogJson === 'object' && !Array.isArray(catalogJson) ? catalogJson : {};
+  const out = new Map();
+  if (!Array.isArray(root.items)) return out;
+  const taxes = new Map();
+  for (const t of asList(root.taxTypes)) { const id = idOf(t.taxTypeId); if (id) taxes.set(id, num(t.percentage) ?? 0); }
+  const seen = new Set();
+  for (const node of asList(root.items)) {
+    if (skipNode(node)) continue;
+    const id = itemId(node), name = itemName(node);
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
+    const price = num(node.price);
+    const taxPct = (Array.isArray(node.taxTypeIds) ? node.taxTypeIds : []).reduce((s, t) => s + (taxes.get(idOf(t)) ?? 0), 0);
+    out.set(id, {
+      id, rista: idOf(node.itemId), sku: str(node.skuCode), name,
+      label: asList(node.variantValues).map((v) => str(v.value)).filter(Boolean).join(' '),
+      price: price !== null && price > 0 ? price : null,
+      taxPct,
+      keys: [id, str(node.skuCode), str(node.sku), str(node.itemId), name],
+    });
+  }
+  return out;
 }

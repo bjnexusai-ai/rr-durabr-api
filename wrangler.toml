@@ -1,0 +1,20 @@
+name = "rr-durbar-api"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+# Websites allowed to call this API (comma separated, no trailing slash).
+# Put your Cloudflare Pages address here. Example: https://rr-durbar.pages.dev
+# Add the real domain later, like: "https://rr-durbar.pages.dev,https://www.yourdomain.com"
+ALLOWED_ORIGINS = "https://rr-durbar.pages.dev"
+# Rista channel name. ONE name for all 6 outlets. Must match Rista EXACTLY (upper/lower case is ignored).
+# 17 Oct 2026: client made a NEW website channel in Rista (not linked to DotPe).
+# CONFIRM the exact name in the /api/debug?path=/branch/list reply: each branch lists its "channels". Fix here if different.
+CHANNEL = "Website"
+# ORDER_SOURCE = ""   # OPTIONAL. Only for a channel that is linked to an aggregator (example: zomato). Rista needs it on /outlet/status.
+#                     # Not needed for a plain website channel. Leave it off.
+
+# Secrets are NOT written here. Set them with:
+#   npx wrangler secret put RISTA_KEY
+#   npx wrangler secret put RISTA_SECRET
+#   npx wrangler secret put DEBUG_TOKEN

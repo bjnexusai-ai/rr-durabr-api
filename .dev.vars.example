@@ -1,0 +1,4 @@
+# Copy to .dev.vars for local testing only. .dev.vars is in .gitignore. Never commit it.
+RISTA_KEY=put-key-here
+RISTA_SECRET=put-secret-here
+DEBUG_TOKEN=make-a-long-random-text

@@ -11,6 +11,7 @@ import { cached, isBackedOff, setBackoff } from './cache.js';
 import { ristaGet, RistaError } from './rista.js';
 import { parseBranchList, parseOutletStatus, parseWeek, weekFromRange, hoursView, istNow, isOpenWeek, sameName, soldOutSet, buildMenu, buildPhotoIndex, photosFor } from './transform.js';
 import { readRequest, makeQuote } from './quote.js';
+import { handleOrder } from './order.js';
 
 const DEBUG_PATHS = ['/branch/list', '/branch', '/outlet/status', '/outlet/delivery/timings', '/items/soldout', '/stockStatus', '/catalog', '/catalog/enterprise', '/catalog/item/list'];
 
@@ -205,7 +206,8 @@ export default {
     const url = new URL(req.url);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(env, req) });
     const isQuote = url.pathname === '/api/quote';
-    if (isQuote ? req.method !== 'POST' : (req.method !== 'GET' && req.method !== 'HEAD')) return reply(env, req, { error: 'method_not_allowed' }, 405);
+    const isOrder = url.pathname === '/api/order';
+    if (isQuote || isOrder ? req.method !== 'POST' : (req.method !== 'GET' && req.method !== 'HEAD')) return reply(env, req, { error: 'method_not_allowed' }, 405);
 
     try {
       if (url.pathname === '/api/health') return reply(env, req, { ok: true, configured: Boolean(env.RISTA_KEY && env.RISTA_SECRET) }, 200, 5);
@@ -216,6 +218,7 @@ export default {
         return reply(env, req, await menuData(env, code));
       }
       if (isQuote) return await quote(env, req);
+      if (isOrder) { const r = await handleOrder(env, req, { outlets: OUTLETS, channel: channelOf(env), loadCatalog, loadSold }); return reply(env, req, r.data, r.status, 0); }
       if (url.pathname === '/api/debug') return debug(env, req, url);
       return reply(env, req, { error: 'not_found' }, 404);
     } catch (e) {

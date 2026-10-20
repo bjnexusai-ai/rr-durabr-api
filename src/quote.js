@@ -55,3 +55,10 @@ export function makeQuote(catalogJson, sold, items) {
     taxIncluded: lines.some((l) => l.ok) && lines.filter((l) => l.ok).every((l) => l.taxIncluded),
   };
 }
+
+// { "<dish id>": <Website price in rupees> } for every dish that has a Website price. Used for the prices on the menu cards.
+export function pricesFor(catalogJson) {
+  const out = {};
+  for (const row of priceIndex(catalogJson).values()) if (row.price !== null && row.id) out[row.id] = row.price;
+  return out;
+}

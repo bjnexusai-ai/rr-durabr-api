@@ -10,7 +10,7 @@ import { OUTLETS, FALLBACK_HOURS, PHONE, TTL, STALE_OK, STALE_PHOTOS, PHOTO_RETR
 import { cached, isBackedOff, setBackoff } from './cache.js';
 import { ristaGet, RistaError } from './rista.js';
 import { parseBranchList, parseOutletStatus, parseWeek, weekFromRange, hoursView, istNow, isOpenWeek, sameName, soldOutSet, buildMenu, buildPhotoIndex, photosFor } from './transform.js';
-import { readRequest, makeQuote } from './quote.js';
+import { readRequest, makeQuote, pricesFor } from './quote.js';
 import { handleOrder } from './order.js';
 
 const DEBUG_PATHS = ['/branch/list', '/branch', '/outlet/status', '/outlet/delivery/timings', '/items/soldout', '/stockStatus', '/catalog', '/catalog/enterprise', '/catalog/item/list'];
@@ -219,6 +219,12 @@ export default {
       }
       if (isQuote) return await quote(env, req);
       if (isOrder) { const r = await handleOrder(env, req, { outlets: OUTLETS, channel: channelOf(env), loadCatalog, loadSold }); return reply(env, req, r.data, r.status, 0); }
+      if (url.pathname === '/api/prices') {
+        const code = (url.searchParams.get('branch') || '').toUpperCase();
+        if (!OUTLETS.some((o) => o.code === code)) return reply(env, req, { error: 'unknown_branch' }, 400);
+        const cat = await loadCatalog(env, code);
+        return reply(env, req, { branch: code, prices: pricesFor(cat.value), stale: Boolean(cat.stale), generatedAt: new Date().toISOString() }, 200, 30);
+      }
       if (url.pathname === '/api/debug') return debug(env, req, url);
       return reply(env, req, { error: 'not_found' }, 404);
     } catch (e) {

@@ -6,12 +6,40 @@
 //   POST /api/quote             prices for a cart, worked out here from Rista (Website channel)
 //   GET  /api/debug?...         raw Rista reply, owner only (needs DEBUG_TOKEN)
 // Secrets (set in Cloudflare, never in GitHub): RISTA_KEY, RISTA_SECRET, DEBUG_TOKEN
+// Ordering (task 4.1a, src/ordering.js): /api/config, /api/slots, /api/otp/send|verify, /api/loyalty/lookup, /api/checkout/start,
+//   /api/order/status, /api/payu/callback|webhook. Closed until ONLINE_ORDER_LIVE=true; without its secrets every route answers 503.
+//   GET /api/admin/selfcheck (x-admin-key = secret ADMIN_KEY). Scheduled jobs: see `scheduled` at the bottom.
 import { OUTLETS, FALLBACK_HOURS, PHONE, TTL, STALE_OK, STALE_PHOTOS, PHOTO_RETRY } from './config.js';
 import { cached, isBackedOff, setBackoff } from './cache.js';
 import { ristaGet, RistaError } from './rista.js';
 import { parseBranchList, parseOutletStatus, parseWeek, weekFromRange, hoursView, istNow, isOpenWeek, sameName, soldOutSet, buildMenu, buildPhotoIndex, photosFor } from './transform.js';
 import { readRequest, makeQuote, pricesFor } from './quote.js';
 import { handleOrder } from './order.js';
+import { createOrderingHandler } from './ordering.js';
+import { makeSender } from './msg91.js';
+import { loyaltyLookup } from './loyalty.js';
+import { payuVerify } from './payuverify.js';
+import { makeOrderingQuote, withPaiseFields } from './quotemoney.js';
+import { createHealthHandler } from './health.js';
+import { housekeeping } from './housekeeping.js';
+import { expireUnpaid } from './expiry.js';
+import { reconcilePayu } from './reconcile.js';
+import { rateCheck } from './otp.js';
+import { sha256hex } from './orderstore.js';
+
+// The checkout prices an order with the SAME code as /api/quote, then converts to exact paise (refuses if it does not add up).
+const ordering = createOrderingHandler({
+  quote: makeOrderingQuote(async (env, ristaCode, items) => {
+    const cat = await loadCatalog(env, ristaCode);
+    const { sold } = await loadSold(env, ristaCode);
+    return makeQuote(cat.value, sold, items);
+  }),
+  makeSender, loyaltyLookup, payuVerify,
+  // pushToRista: added with the Rista Sale adapter (task 8.1). Until then paid orders stay PAID and the owner sees them.
+});
+const selfcheck = createHealthHandler();
+const DAILY_CRON = '30 20 * * *';   // 02:00 IST: daily PayU check (8.5). Every other trigger: housekeeping + unpaid expiry.
+const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v ?? '').trim());
 
 const DEBUG_PATHS = ['/branch/list', '/branch', '/outlet/status', '/outlet/delivery/timings', '/items/soldout', '/stockStatus', '/catalog', '/catalog/enterprise', '/catalog/item/list'];
 
@@ -178,10 +206,20 @@ async function quote(env, req) {
   const r = readRequest(body);
   if (!r.ok) return reply(env, req, { error: r.error }, 400);
 
+  // 10.1a: 60 quotes per minute per IP (contract section 7; QUOTE_RATE_PER_MIN raises it if mobile networks share one IP). Only with the database bound; a limit failure never blocks a quote.
+  if (env.DB) {
+    try {
+      const ip = await sha256hex(`${req.headers.get('CF-Connecting-IP') || ''}:${env.OTP_HASH_SECRET || ''}`);
+      const rl = await rateCheck(env.DB, { bucket: 'quote_ip', key: ip, limit: Math.max(20, Number.parseInt(env.QUOTE_RATE_PER_MIN, 10) || 60), windowSec: 60 });
+      if (!rl.ok) return new Response(JSON.stringify({ error: 'rate_limited', retryAfterSeconds: rl.retryAfterSeconds }), { status: 429, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Retry-After': String(rl.retryAfterSeconds), ...cors(env, req) } });
+    } catch (e) { console.error('quote rate check failed:', e.message); }
+  }
+
   const cat = await loadCatalog(env, code);
   const { sold, stale: soldStale } = await loadSold(env, code);
   const q = makeQuote(cat.value, sold, r.items);
-  return reply(env, req, { branch: code, ...q, stale: Boolean(cat.stale || soldStale), generatedAt: new Date().toISOString() }, 200, 0);
+  // 4.5a: same rupee fields as before for the site cart, plus exact paise fields for the checkout.
+  return reply(env, req, { branch: code, ...withPaiseFields(q, r.items), stale: Boolean(cat.stale || soldStale), generatedAt: new Date().toISOString() }, 200, 0);
 }
 
 /* ---------- /api/debug (owner only) ---------- */
@@ -202,8 +240,11 @@ async function debug(env, req, url) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
+    if (url.pathname === '/api/admin/selfcheck') return selfcheck(req, env);
+    const o = await ordering(req, env, ctx);   // null for every path it does not own
+    if (o) return o;
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(env, req) });
     const isQuote = url.pathname === '/api/quote';
     const isOrder = url.pathname === '/api/order';
@@ -218,6 +259,8 @@ export default {
         return reply(env, req, await menuData(env, code));
       }
       if (isQuote) return await quote(env, req);
+      // 10.4 (C8): the old test-order path is locked unless the owner switches it on for a test. Real orders use /api/checkout/start.
+      if (isOrder && !truthy(env.LEGACY_TEST_ORDER)) return reply(env, req, { error: 'not_found' }, 404);
       if (isOrder) { const r = await handleOrder(env, req, { outlets: OUTLETS, channel: channelOf(env), loadCatalog, loadSold }); return reply(env, req, r.data, r.status, 0); }
       if (url.pathname === '/api/prices') {
         const code = (url.searchParams.get('branch') || '').toUpperCase();
@@ -232,5 +275,21 @@ export default {
       if (e instanceof RistaError && e.status === 0) return reply(env, req, { error: 'not_configured' }, 500);
       return reply(env, req, { error: 'rista_unavailable' }, 502);
     }
+  },
+
+  // Cron triggers in wrangler.toml. Every job is safe with ordering switched off: with no orders or no PayU keys they do nothing.
+  async scheduled(event, env, ctx) {
+    if (!env.DB) return;
+    const log = (name) => (r) => console.log(name, JSON.stringify(r));
+    const fail = (name) => (e) => console.error(`${name} failed:`, String(e && e.message).slice(0, 200));
+    if (event.cron === DAILY_CRON) {
+      // The owner alert channel comes with task 10.1; until then the findings go to the Worker log.
+      ctx.waitUntil(reconcilePayu(env.DB, env, { payuVerify, alert: async (text) => console.error('OWNER ALERT', text) }).then(log('reconcile'), fail('reconcile')));
+      return;
+    }
+    ctx.waitUntil(Promise.all([
+      housekeeping(env.DB).then(log('housekeeping'), fail('housekeeping')),
+      expireUnpaid(env.DB, env, { payuVerify }).then(log('expiry'), fail('expiry')),
+    ]));
   },
 };

@@ -1,3 +1,8 @@
+> **Update 26 Oct night (task 4.1a DONE on branch `rr-26oct`):** `src/index.js` now wires everything below; see the commit
+> "4.1a". Still NOT connected: `pushToRista` (needs the Rista Sale adapter, 8.1; `src/order.js` `buildSale` is the starting
+> point) and the owner alert channel (10.1; findings go to the Worker log as `OWNER ALERT`). Ordering stays closed until
+> `ONLINE_ORDER_LIVE=true` and the secrets exist; the switch list is in the table below.
+
 # How the new API files plug into `src/index.js` (for task 4.1a; nothing here is wired yet)
 
 All files are NEW and not imported by anything, so adding them changes nothing. The final, exact `index.js` patch is written in

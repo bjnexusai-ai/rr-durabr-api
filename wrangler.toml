@@ -28,3 +28,8 @@ database_id = "1108e647-510c-41f5-9e21-c285ce059392"
 [[kv_namespaces]]
 binding = "RR_KV"
 id = "24b0b235b4964a1d8c51b8b2adc4f296"
+
+# Scheduled jobs (src/index.js `scheduled`). Every 10 min: housekeeping + close unpaid orders (PayU asked first).
+# 20:30 UTC = 02:00 IST: daily PayU check (task 8.5). Both do nothing while ordering is off.
+[triggers]
+crons = ["*/10 * * * *", "30 20 * * *"]

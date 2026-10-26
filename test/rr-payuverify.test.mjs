@@ -58,3 +58,12 @@ test('PayU down, missing keys or a strange txnid never give success', async () =
   assert.equal((await makePayuVerify({ fetchImpl: fakePayu(ok('RR-1')) })({}, 'RR-1')).status, 'unconfigured');
   assert.equal((await makePayuVerify({ fetchImpl: fakePayu(ok('RR-1')) })(ENV, 'RR 1|x')).status, 'bad_txnid');
 });
+
+test('PayU never saw the txnid (status 0, entry "Not Found") -> not_found, so an abandoned order can be closed; any other status 0 stays an error', async () => {
+  const nf = { status: 0, msg: '0 out of 1 Transactions Fetched Successfully', transaction_details: { 'RR-100300': { mihpayid: 'Not Found', status: 'Not Found' } } };
+  assert.deepEqual(await makePayuVerify({ fetchImpl: fakePayu(nf) })(ENV, 'RR-100300'), { status: 'not_found' });
+  const other = { status: 0, msg: 'Invalid Hash', transaction_details: {} };
+  assert.equal((await makePayuVerify({ fetchImpl: fakePayu(other) })(ENV, 'RR-100300')).status, 'error');
+  const wrongTxn = { status: 0, transaction_details: { 'RR-999': { status: 'Not Found' } } };
+  assert.equal((await makePayuVerify({ fetchImpl: fakePayu(wrongTxn) })(ENV, 'RR-100300')).status, 'error');
+});

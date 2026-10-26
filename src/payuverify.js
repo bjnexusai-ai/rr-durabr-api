@@ -46,6 +46,10 @@ export function makePayuVerify({ fetchImpl = fetch, timeoutMs = 10000 } = {}) {
       return { status: 'unreachable' };
     } finally { if (timer) clearTimeout(timer); }
 
+    // PayU's documented reply for a txnid it never saw: status 0, "0 out of 1 Transactions Fetched", and the entry says "Not Found".
+    // That is a real answer (the customer never paid), so unpaid orders can be closed. [TO CONFIRM on the PayU test merchant.]
+    if (res.ok && j && Number(j.status) === 0 && j.transaction_details && j.transaction_details[id]
+      && String(j.transaction_details[id].status || '').toLowerCase() === 'not found') return { status: 'not_found' };
     if (!res.ok || !j || Number(j.status) !== 1 || !j.transaction_details) return { status: 'error' };
     const t = j.transaction_details[id];
     if (!t || typeof t !== 'object') return { status: 'not_found' };

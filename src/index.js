@@ -26,6 +26,11 @@ import { expireUnpaid } from './expiry.js';
 import { reconcilePayu } from './reconcile.js';
 import { rateCheck } from './otp.js';
 import { sha256hex } from './orderstore.js';
+import { makeRistaPusher } from './ristapush.js';
+import { sendSale } from './ristasale.js';
+
+// 8.1: orders reach the outlet POS only with RISTA_PUSH_LIVE=true (first a staffed test at MR with RISTA_PUSH_TEST=true, task 8.6).
+const rista = makeRistaPusher({ sendSale, alert: async (env, a) => console.error('OWNER ALERT', a.type, a.orderId, a.message) });
 
 // The checkout prices an order with the SAME code as /api/quote, then converts to exact paise (refuses if it does not add up).
 const ordering = createOrderingHandler({
@@ -35,7 +40,7 @@ const ordering = createOrderingHandler({
     return makeQuote(cat.value, sold, items);
   }),
   makeSender, loyaltyLookup, payuVerify,
-  // pushToRista: added with the Rista Sale adapter (task 8.1). Until then paid orders stay PAID and the owner sees them.
+  pushToRista: (env, o) => (truthy(env.RISTA_PUSH_LIVE) ? rista.pushToRista(env, o) : null),   // off: paid orders stay PAID
 });
 const selfcheck = createHealthHandler();
 const DAILY_CRON = '30 20 * * *';   // 02:00 IST: daily PayU check (8.5). Every other trigger: housekeeping + unpaid expiry.
@@ -290,6 +295,7 @@ export default {
     ctx.waitUntil(Promise.all([
       housekeeping(env.DB).then(log('housekeeping'), fail('housekeeping')),
       expireUnpaid(env.DB, env, { payuVerify }).then(log('expiry'), fail('expiry')),
+      ...(truthy(env.RISTA_PUSH_LIVE) ? [rista.retryPushes(env).then(log('rista-retry'), fail('rista-retry'))] : []),
     ]));
   },
 };

@@ -206,11 +206,11 @@ async function quote(env, req) {
   const r = readRequest(body);
   if (!r.ok) return reply(env, req, { error: r.error }, 400);
 
-  // 10.1a: 60 quotes per minute per IP (contract section 7). Only with the database bound; a limit failure never blocks a quote.
+  // 10.1a: 60 quotes per minute per IP (contract section 7; QUOTE_RATE_PER_MIN raises it if mobile networks share one IP). Only with the database bound; a limit failure never blocks a quote.
   if (env.DB) {
     try {
       const ip = await sha256hex(`${req.headers.get('CF-Connecting-IP') || ''}:${env.OTP_HASH_SECRET || ''}`);
-      const rl = await rateCheck(env.DB, { bucket: 'quote_ip', key: ip, limit: 60, windowSec: 60 });
+      const rl = await rateCheck(env.DB, { bucket: 'quote_ip', key: ip, limit: Math.max(20, Number.parseInt(env.QUOTE_RATE_PER_MIN, 10) || 60), windowSec: 60 });
       if (!rl.ok) return new Response(JSON.stringify({ error: 'rate_limited', retryAfterSeconds: rl.retryAfterSeconds }), { status: 429, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Retry-After': String(rl.retryAfterSeconds), ...cors(env, req) } });
     } catch (e) { console.error('quote rate check failed:', e.message); }
   }

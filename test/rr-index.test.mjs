@@ -12,7 +12,8 @@ mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-24T09:00:00Z') });
 
 const CATALOG = { taxTypes: [{ taxTypeId: 'tx1', name: 'GST', percentage: 5 }], categories: [{ categoryId: 'c2', name: 'Starters' }],
   items: [{ type: 'Simple', itemId: 'i6', skuCode: 'S1', itemName: 'Chicken 65', price: 249, categoryId: 'c2', taxTypeIds: ['tx1'], status: 'Active' }] };
-const net = { sms: [], payu: { status: 'success', amt: '522.90' }, calls: [] };
+const net = { sms: [], payu: { status: 'success', amt: '522.90' }, calls: [], sales: [] };
+const pending = [];
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(String(url)); net.calls.push(u.host + u.pathname);
   const ok = (b) => new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -20,6 +21,7 @@ globalThis.fetch = async (url, init = {}) => {
     const p = u.pathname.replace('/v1', '');
     if (p === '/catalog') return ok(CATALOG);
     if (p === '/stockStatus') return ok({ stockOut: [], stockIn: ['S1'] });
+    if (p === '/sale') { net.sales.push(JSON.parse(String(init.body))); return ok({ invoiceNumber: 'INV-' + net.sales.length }); }
     return ok({});
   }
   if (u.host === 'challenges.cloudflare.com') return ok({ success: String(init.body).includes('turnstile-ok') });
@@ -39,7 +41,7 @@ const ENV = (db, extra = {}) => ({ DB: db, RISTA_KEY: 'KEY123', RISTA_SECRET: 'S
   ONLINE_ORDER_LIVE: 'true', ONLINE_OUTLETS_LIVE: 'moghalrajpuram', COD_LIVE: 'false', TOKEN_SIGNING_KEY: 'k'.repeat(40), OTP_HASH_SECRET: 'o'.repeat(40),
   PAYMENT_PROVIDER: 'payu', PAYU_MODE: 'test', PAYU_KEY: 'testkey', PAYU_SALT: SALT, OTP_PROVIDER: 'msg91', MSG91_AUTHKEY: 'auth-test', MSG91_TEMPLATE_ID: 'tmpl-1',
   LOYALTY_PROVIDER: 'none', API_ORIGIN: 'https://api.example', SITE_ORIGIN: 'https://site.example', TERMS_VERSION: 'v1', TURNSTILE_SECRET: 'ts-test', ...extra });
-const ctx = () => { const w = []; return { waitUntil: (p) => w.push(p), done: () => Promise.all(w) }; };
+const ctx = () => { const w = []; return { waitUntil: (p) => { w.push(p); pending.push(p); }, done: () => Promise.all(w) }; };
 const call = (env, method, path, { body, headers = {}, raw } = {}) => worker.fetch(new Request('https://api.example' + path, { method,
   headers: { Origin: 'https://site.example', 'Content-Type': raw !== undefined ? 'application/x-www-form-urlencoded' : 'application/json', ...headers },
   body: raw !== undefined ? raw : body !== undefined ? JSON.stringify(body) : undefined }), env, ctx());
@@ -105,5 +107,22 @@ describe('index.js wiring (4.1a)', { skip: SKIP }, () => {
     assert.equal((await db.prepare('SELECT state FROM orders WHERE id = ?').bind(o.orderId).first()).state, 'EXPIRED');
     const d = ctx(); await worker.scheduled({ cron: '30 20 * * *' }, env, d); await d.done();
     net.payu.status = 'success';
+  });
+  test('Rista push (8.1): off by default (paid order stays PAID, nothing sent); with RISTA_PUSH_LIVE=true the paid order reaches Rista and is CONFIRMED', async () => {
+    for (const live of [false, true]) {
+      const db = newDb(); const env = ENV(db, live ? { RISTA_PUSH_LIVE: 'true' } : {});
+      const before = net.sales.length;
+      const o = await placeOrder(env);
+      const f = { key: 'testkey', txnid: o.orderId, amount: '522.90', productinfo: 'RR Durbar pickup order', firstname: 'Asha', email: 'orders@rrdurbar.com', status: 'success', mihpayid: 'pu-1' };
+      const raw = new URLSearchParams({ ...f, hash: await sha512hex(responseHashString({ ...f, salt: SALT })) }).toString();
+      await call(env, 'POST', `/api/payu/callback?t=${encodeURIComponent(o.statusToken)}`, { raw });
+      await Promise.all(pending.splice(0));
+      const st = (await db.prepare('SELECT state FROM orders WHERE id = ?').bind(o.orderId).first()).state;
+      if (!live) { assert.equal(st, 'PAID'); assert.equal(net.sales.length, before, 'nothing sent to Rista'); continue; }
+      assert.equal(st, 'CONFIRMED'); assert.equal(net.sales.length, before + 1);
+      const sale = net.sales.at(-1);
+      assert.equal(sale.branchCode, 'MR'); assert.deepEqual(sale.items, [{ shortName: 'Chicken 65', skuCode: 'S1', quantity: 2, unitPrice: 249 }]);
+      assert.ok(sale.tags.includes('PAID-ONLINE'));
+    }
   });
 });

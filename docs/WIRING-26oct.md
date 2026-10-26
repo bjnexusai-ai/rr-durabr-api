@@ -1,3 +1,5 @@
+> **Update 26 Oct, late (task 8.1 on branch `rr-rista`):** `src/ristasale.js` sends paid and pay-at-pickup orders to Rista's Save sale (same request as `src/order.js`), wired in `index.js` behind `RISTA_PUSH_LIVE` (off). First run: a staffed test at MR with `RISTA_PUSH_LIVE=true` and `RISTA_PUSH_TEST=true` (orders say DO NOT PREPARE), only MR in `ONLINE_OUTLETS_LIVE` (task 8.6). Still open: Rista's online-payment call (8.3): until then paid sales carry a PAID-ONLINE tag and a DO NOT COLLECT note.
+>
 > **Update 26 Oct night (task 4.1a DONE on branch `rr-26oct`):** `src/index.js` now wires everything below; see the commit
 > "4.1a". Still NOT connected: `pushToRista` (needs the Rista Sale adapter, 8.1; `src/order.js` `buildSale` is the starting
 > point) and the owner alert channel (10.1; findings go to the Worker log as `OWNER ALERT`). Ordering stays closed until

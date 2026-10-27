@@ -104,6 +104,7 @@ describe('config, slots, CORS', { skip: SKIP }, () => {
     assert.ok(s.slots.every((x) => /:(00|30) [ap]m$/.test(x.label)));
     assert.equal(s.slots.at(-1).label, '11:00 pm');   // 11:00 to 11:30 pm, closing 23:30
     assert.equal(s.slots.length, 17);
+    assert.equal((Date.parse(s.slots[0].endsAt) - Date.parse(s.slots[0].id)) / 60000, 30);   // the page shows start - end from endsAt
     assert.equal((await t.json(await t.call('GET', '/api/slots?branch=singhnagar'))).error.code, 'branch_closed');
     assert.equal((await t.call('GET', '/api/slots?branch=nowhere')).status, 400);
   });

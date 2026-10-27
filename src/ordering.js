@@ -18,7 +18,7 @@ export const DEFAULT_OUTLETS = {
   poranki: { name: 'Poranki', ristaCode: 'PO' },
   autonagar: { name: 'Autonagar', ristaCode: 'AT' },
 };
-const DEFAULT_HOURS = { open: '11:00', close: '23:30', minPrepMinutes: 30, slotMinutes: 15 }; // ASSUMED, owner to confirm (plan section 9)
+const DEFAULT_HOURS = { open: '11:00', close: '23:30', minPrepMinutes: 30, slotMinutes: 30 }; // half-hour pickup windows (owner, 27 Oct); hours and prep ASSUMED, owner to confirm (plan section 9)
 
 const MSG = {
   ordering_closed: 'Online ordering is not open yet. Please call the outlet to order.',
@@ -154,7 +154,7 @@ export function createOrderingHandler(deps = {}) {
     const o = outlet(env, branch);
     if (!o) return fail(env, req, 400, 'bad_request', { field: 'branch' });
     if (!o.live) return fail(env, req, 409, 'branch_closed');
-    const r = makeSlots({ now: now(), open: o.open, close: o.close, minPrepMinutes: o.minPrepMinutes, slotMinutes: o.slotMinutes });
+    const r = makeSlots({ now: now(), open: o.open, close: o.close, minPrepMinutes: o.minPrepMinutes, slotMinutes: o.slotMinutes, lastSlotBufferMinutes: o.slotMinutes, max: 48 });   // every window left today, for the dropdown
     return reply(env, req, r.outletClosed ? { slots: [], outletClosed: true } : { slots: r.slots });
   }
 
@@ -271,7 +271,7 @@ export function createOrderingHandler(deps = {}) {
       // Contract section 7: 5 placements per 10 minutes per phone. Replays of the same key were answered above and do not count.
       const rl = await rateCheck(db, { bucket: 'checkout_phone', key: who.phone, limit: 5, windowSec: 600, now: now() });
       if (!rl.ok) return stop(429, 'rate_limited', { retryAfterSeconds: rl.retryAfterSeconds });
-      if (!validateSlot(v.slotId, { now: now(), open: o.open, close: o.close, minPrepMinutes: o.minPrepMinutes, slotMinutes: o.slotMinutes })) return stop(409, 'slot_invalid');
+      if (!validateSlot(v.slotId, { now: now(), open: o.open, close: o.close, minPrepMinutes: o.minPrepMinutes, slotMinutes: o.slotMinutes, lastSlotBufferMinutes: o.slotMinutes })) return stop(409, 'slot_invalid');
 
       let q;
       try { q = await deps.quote(env, { branch: v.branch, ristaCode: o.ristaCode, items: v.items }); } catch { return stop(503, 'provider_down'); }

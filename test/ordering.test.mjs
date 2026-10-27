@@ -95,10 +95,15 @@ describe('config, slots, CORS', { skip: SKIP }, () => {
     assert.equal(c.termsVersion, 'v1'); assert.equal(c.codMaxPaise, 100000);
     assert.equal(Object.keys(by).some((k) => k.includes('patamata')), false);
   });
-  test('slots: first slot is now plus 30 minutes on a 15 minute step; closed branch gives branch_closed; bad branch gives bad_request', async () => {
+  test('slots: half-hour windows (owner, 27 Oct): first is now plus 30 minutes, then every 30 minutes until the last window ends at closing; closed branch gives branch_closed; bad branch gives bad_request', async () => {
     const t = mk();
     const s = await t.json(await t.call('GET', '/api/slots?branch=moghalrajpuram'));
-    assert.equal(s.slots[0].id, SLOT); assert.equal(s.slots[0].label, '3:00 pm'); assert.ok(s.slots.length <= 8);
+    assert.equal(s.slots[0].id, SLOT); assert.equal(s.slots[0].label, '3:00 pm');
+    const steps = new Set(s.slots.slice(1).map((x, i) => (Date.parse(x.id) - Date.parse(s.slots[i].id)) / 60000));
+    assert.deepEqual([...steps], [30]);
+    assert.ok(s.slots.every((x) => /:(00|30) [ap]m$/.test(x.label)));
+    assert.equal(s.slots.at(-1).label, '11:00 pm');   // 11:00 to 11:30 pm, closing 23:30
+    assert.equal(s.slots.length, 17);
     assert.equal((await t.json(await t.call('GET', '/api/slots?branch=singhnagar'))).error.code, 'branch_closed');
     assert.equal((await t.call('GET', '/api/slots?branch=nowhere')).status, 400);
   });

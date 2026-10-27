@@ -197,6 +197,27 @@ export function createOrderingHandler(deps = {}) {
     return reply(env, req, { token, expiresInSeconds: r.expiresInSeconds });
   }
 
+  // ---- Pay at pickup: running total (owner, 27 Oct). Online payment has no limit. Pay at pickup only while this phone's
+  // OPEN pay-at-pickup orders plus the new order stay at or under COD_MAX_TOTAL (Rs 1000). Open = same definition as the
+  // open-order cap (slot not more than 2 hours ago, not failed or cancelled).
+  async function openCodPaise(db, phone) {
+    const r = await db.prepare("SELECT COALESCE(SUM(total_paise), 0) AS p FROM orders WHERE customer_id = (SELECT id FROM customers WHERE phone = ?) AND method = 'cod' AND state IN ('CREATED','PUSH_FAILED','PUSHED_TO_RISTA','CONFIRMED') AND slot_at > ?")
+      .bind(phone, new Date(now().getTime() - 2 * 3600 * 1000).toISOString()).first();
+    return (r && r.p) || 0;
+  }
+  const codLeftMsg = (env, left) => left > 0
+    ? `Pay at pickup is for up to Rs ${Math.round(codMaxPaiseFromEnv(env) / 100)} in total across your open orders. You have Rs ${(left / 100).toFixed(2)} left. Please pay online.`
+    : `You already have Rs ${Math.round(codMaxPaiseFromEnv(env) / 100)} of pay-at-pickup orders open. Please pay online.`;
+
+  // ---- GET /api/checkout/limits (Bearer): what pay at pickup still allows for this phone ----
+  async function routeLimits(env, req, db) {
+    if (!secretsOk(env, ['TOKEN_SIGNING_KEY'])) return fail(env, req, 503, 'provider_down');
+    const who = await bearer(env, req);
+    if (!who.ok) return fail(env, req, 401, 'token_invalid');
+    const max = codMaxPaiseFromEnv(env), open = await openCodPaise(db, who.phone);
+    return reply(env, req, { codMaxPaise: max, codOpenPaise: open, codRemainingPaise: Math.max(0, max - open) });
+  }
+
   // ---- POST /api/loyalty/lookup ----
   async function routeLoyalty(env, req) {
     if (!secretsOk(env, ['TOKEN_SIGNING_KEY'])) return fail(env, req, 503, 'provider_down');
@@ -287,6 +308,10 @@ export function createOrderingHandler(deps = {}) {
       // The browser's choice is never trusted: re-check with the SERVER total (plan 7.0).
       const m = checkMethod(v.method, quote.totalPaise, { codMaxPaise: codMaxPaiseFromEnv(env), codAllowedForBranch: o.codAllowed });
       if (!m.ok) return m.code === 'bad_method' ? stop(400, 'bad_request', { field: 'method' }) : stop(400, 'cod_not_allowed');
+      if (v.method === 'cod') {
+        const left = codMaxPaiseFromEnv(env) - (await openCodPaise(db, who.phone));
+        if (quote.totalPaise > left) return stop(400, 'cod_not_allowed', { field: 'method', message: codLeftMsg(env, Math.max(0, left)) });
+      }
 
       // Open-order cap, checked BEFORE the token is spent so a refusal does not burn the customer's code.
       // Same definition as v_open_orders (migration 0002), counted with the handler's clock so it is testable and not tied to the database clock.
@@ -435,6 +460,7 @@ export function createOrderingHandler(deps = {}) {
     '/api/otp/verify': { m: 'POST', gated: true },
     '/api/loyalty/lookup': { m: 'POST', gated: true },
     '/api/checkout/start': { m: 'POST', gated: true },
+    '/api/checkout/limits': { m: 'GET', gated: true },
     '/api/order/status': { m: 'GET', gated: false },
     '/api/payu/callback': { m: 'POST', gated: false },
     '/api/payu/webhook': { m: 'POST', gated: false },
@@ -461,6 +487,7 @@ export function createOrderingHandler(deps = {}) {
       if (path === '/api/otp/verify') return await routeOtpVerify(env, request, db);
       if (path === '/api/loyalty/lookup') return await routeLoyalty(env, request);
       if (path === '/api/checkout/start') return await routeCheckoutStart(env, request, db, ctx);
+      if (path === '/api/checkout/limits') return await routeLimits(env, request, db);
       if (path === '/api/order/status') return await routeStatus(env, request, url, db);
       if (path === '/api/payu/callback') return await routePayuCallback(env, request, db, ctx, url);
       if (path === '/api/payu/webhook') return await routePayuWebhook(env, request, db, ctx);

@@ -232,12 +232,28 @@ describe('checkout/start', { skip: SKIP }, () => {
   });
   test('open-order cap: a third open order for one phone is refused with 429 and the token is kept', async () => {
     const t = mk();
-    for (let i = 0; i < 2; i++) assert.equal((await t.start(await t.login('9000000001'), t.body({ method: 'cod' }))).status, 200);
+    for (const method of ['cod', 'payu']) assert.equal((await t.start(await t.login('9000000001'), t.body({ method }))).status, 200);
     const tok3 = await t.login('9000000001');
-    const r = await t.start(tok3, t.body({ method: 'cod' }));
+    const r = await t.start(tok3, t.body({ method: 'payu' }));
     assert.deepEqual([r.status, (await t.json(r)).error.code], [429, 'too_many_open_orders']);
     assert.equal(await t.count('orders'), 2);
     assert.equal((await t.start(tok3, t.body({ method: 'payu' }))).status, 429); // still capped, not a token problem
+  });
+  test('pay at pickup running total (owner, 27 Oct): Rs 630 open + Rs 630 new > Rs 1000 -> pay at pickup refused with a clear message, online still works; limits route shows what is left', async () => {
+    const t = mk();
+    assert.equal((await t.start(await t.login('9000000002'), t.body({ method: 'cod' }))).status, 200);
+    const tok = await t.login('9000000002');
+    const lim = await t.json(await t.call('GET', '/api/checkout/limits', { headers: { Authorization: `Bearer ${tok}` } }));
+    assert.deepEqual(lim, { codMaxPaise: 100000, codOpenPaise: 63000, codRemainingPaise: 37000 });
+    const r = await t.start(tok, t.body({ method: 'cod' }));
+    const e = (await t.json(r)).error;
+    assert.deepEqual([r.status, e.code, e.field], [400, 'cod_not_allowed', 'method']);
+    assert.match(e.message, /up to Rs 1000 in total across your open orders\. You have Rs 370\.00 left\. Please pay online\./);
+    assert.equal((await t.start(tok, t.body({ method: 'payu' }))).status, 200, 'online has no limit and the code was not burnt');
+  });
+  test('limits route needs a valid token', async () => {
+    const t = mk();
+    assert.equal((await t.call('GET', '/api/checkout/limits')).status, 401);
   });
   test('expectedTotalPaise that differs from the server total gives quote_mismatch with the new total and burns nothing', async () => {
     const t = mk(); const tok = await t.login();

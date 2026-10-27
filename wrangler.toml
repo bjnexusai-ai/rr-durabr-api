@@ -11,6 +11,25 @@ ALLOWED_ORIGINS = "https://rr-durbar.bjnexusai-alekya.workers.dev,https://rr-dur
 # 17 Oct 2026: client made a NEW website channel in Rista (not linked to DotPe).
 # CONFIRM the exact name in the /api/debug?path=/branch/list reply: each branch lists its "channels". Fix here if different.
 CHANNEL = "Website"
+
+# ---- Online ordering (task 4.1a). SAFE DEFAULTS: everything closed. Switch on in this order: docs/GO_LIVE_SWITCHES.md ----
+ONLINE_ORDER_LIVE = "false"          # master switch for new orders
+ONLINE_OUTLETS_LIVE = "moghalrajpuram"   # first outlet only (task 10.6); others after 3 to 5 real orders
+COD_LIVE = "false"                   # pay at pickup
+COD_OUTLETS = "moghalrajpuram"
+COD_MAX_TOTAL = "1000"               # rupees, including taxes (decision D9)
+PAYMENT_PROVIDER = "payu"
+PAYU_MODE = "test"                   # "live" only after the PayU test merchant checks pass
+OTP_PROVIDER = "msg91"
+LOYALTY_PROVIDER = "none"            # "reelo" after R1 to R5 and keys
+RISTA_PUSH_LIVE = "false"            # orders reach the POS only after the staffed MR test (8.6)
+RISTA_PUSH_TEST = "true"             # while testing, Rista orders say TEST ORDER - DO NOT PREPARE
+UNPAID_TIMEOUT_MIN = "30"
+TERMS_VERSION = "v1"
+SITE_ORIGIN = "https://rr-durbar.ramana-peravali.workers.dev"     # change to https://rrdurbar.com at the domain move (3.8)
+API_ORIGIN = "https://rr-durbar-api.ramana-peravali.workers.dev"
+# Secrets (hidden prompt only, NEVER here): TOKEN_SIGNING_KEY, OTP_HASH_SECRET, PAYU_KEY, PAYU_SALT, MSG91_AUTHKEY,
+# MSG91_TEMPLATE_ID, TURNSTILE_SECRET, ADMIN_KEY, REELO_VENDOR_ID, REELO_<SN/MR/BH/PO/AT>_MERCHANT_ID, REELO_<..>_CUSTOMER_KEY
 # ORDER_SOURCE = ""   # OPTIONAL. Only for a channel that is linked to an aggregator (example: zomato). Rista needs it on /outlet/status.
 #                     # Not needed for a plain website channel. Leave it off.
 

@@ -2,6 +2,7 @@
 // Routes:
 //   GET  /api/health            quick check
 //   GET  /api/outlets           6 outlets: open/closed/call, hours, lat/lng
+//   GET  /api/whats-new         home "What's new": CMS announcements + Instagram feed (src/whatsnew.js)
 //   GET  /api/menu?branch=MR    dishes + sold-out marks + photo links + "orderable" flag. NO prices.
 //   POST /api/quote             prices for a cart, worked out here from Rista (Website channel)
 //   GET  /api/debug?...         raw Rista reply, owner only (needs DEBUG_TOKEN)
@@ -28,6 +29,7 @@ import { rateCheck } from './otp.js';
 import { sha256hex } from './orderstore.js';
 import { makeRistaPusher } from './ristapush.js';
 import { sendSale } from './ristasale.js';
+import { whatsNewData, whatsNewCron } from './whatsnew.js';
 
 // 8.1: orders reach the outlet POS only with RISTA_PUSH_LIVE=true (first a staffed test at MR with RISTA_PUSH_TEST=true, task 8.6).
 const rista = makeRistaPusher({ sendSale, alert: async (env, a) => console.error('OWNER ALERT', a.type, a.orderId, a.message) });
@@ -43,6 +45,7 @@ const ordering = createOrderingHandler({
   pushToRista: (env, o) => (truthy(env.RISTA_PUSH_LIVE) ? rista.pushToRista(env, o) : null),   // off: paid orders stay PAID
 });
 const selfcheck = createHealthHandler();
+const IG_CRON = '0 * * * *';      // hourly: Instagram feed for the home page "What's new" (+ weekly token refresh inside)
 const DAILY_CRON = '30 20 * * *';   // 02:00 IST: daily PayU check (8.5). Every other trigger: housekeeping + unpaid expiry.
 const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v ?? '').trim());
 
@@ -257,6 +260,7 @@ export default {
 
     try {
       if (url.pathname === '/api/health') return reply(env, req, { ok: true, configured: Boolean(env.RISTA_KEY && env.RISTA_SECRET) }, 200, 5);
+      if (url.pathname === '/api/whats-new') return reply(env, req, await whatsNewData(env), 200, 300);
       if (url.pathname === '/api/outlets') return reply(env, req, await outletsData(env));
       if (url.pathname === '/api/menu') {
         const code = (url.searchParams.get('branch') || '').toUpperCase();
@@ -284,6 +288,10 @@ export default {
 
   // Cron triggers in wrangler.toml. Every job is safe with ordering switched off: with no orders or no PayU keys they do nothing.
   async scheduled(event, env, ctx) {
+    if (event.cron === IG_CRON) {   // needs KV only, not the database
+      ctx.waitUntil(whatsNewCron(env, { alert: async (text) => console.error('OWNER ALERT', text) }).then((r) => console.log('whatsnew', JSON.stringify(r)), (e) => console.error('whatsnew failed:', String(e && e.message).slice(0, 200))));
+      return;
+    }
     if (!env.DB) return;
     const log = (name) => (r) => console.log(name, JSON.stringify(r));
     const fail = (name) => (e) => console.error(`${name} failed:`, String(e && e.message).slice(0, 200));

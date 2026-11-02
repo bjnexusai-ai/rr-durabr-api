@@ -50,5 +50,7 @@ id = "24b0b235b4964a1d8c51b8b2adc4f296"
 
 # Scheduled jobs (src/index.js `scheduled`). Every 10 min: housekeeping + close unpaid orders (PayU asked first).
 # 20:30 UTC = 02:00 IST: daily PayU check (task 8.5). Both do nothing while ordering is off.
+# Top of every hour: Instagram feed for the home page "What's new" (and the weekly token refresh). Does nothing until the secret IG_TOKEN is set.
+# Secret (hidden prompt or dashboard, never here): IG_TOKEN
 [triggers]
-crons = ["*/10 * * * *", "30 20 * * *"]
+crons = ["*/10 * * * *", "30 20 * * *", "0 * * * *"]

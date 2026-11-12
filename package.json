@@ -10,5 +10,8 @@
   },
   "devDependencies": {
     "wrangler": "^4"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.10"
   }
 }

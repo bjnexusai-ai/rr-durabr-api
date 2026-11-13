@@ -1,8 +1,7 @@
 // Tasks 7.2 and 7.3 helpers: PayU hash and form fields. Pure functions + Web Crypto.
-// [TBC - MUST VERIFY BEFORE USE]: the hash field order below is PayU's long-standing documented formula, written from memory,
-// NOT checked against PayU's current docs or a test merchant account. Plan 7.2 requires that check. Do not go live until a PayU TEST
-// payment with these functions is accepted by test.payu.in and the response hash verifies. Also confirm: the action path, whether a
-// guest's missing email is accepted (placeholder below), and that no phone/email format rule rejects our values.
+// Verified on 13 Nov 2026 against test.payu.in with PayU's shared sample test merchant (tools/payu-sandbox.mjs): the request hash was accepted
+// and the response hash verified for success, failure and cancel. NOT yet proven on the client's own merchant: the live action path,
+// the placeholder guest email below, and any phone/email format rule. Prove those with one small live payment before opening ordering.
 import { paiseToRupeeString } from './pay.js';
 
 export const PAYU_ACTION = { test: 'https://test.payu.in/_payment', live: 'https://secure.payu.in/_payment' };
@@ -53,4 +52,4 @@ export async function verifyPayuResponse(p, { key, salt, expectedTxnid, expected
   if (p.amount !== paiseToRupeeString(expectedAmountPaise)) return { ok: false, code: 'amount_mismatch' };
   return { ok: true, status: String(p.status).toLowerCase(), payuRef: p.mihpayid || null };
 }
-// Even with a good hash, plan 7.3 also requires a server-to-server verify-payment call to PayU before marking PAID. Not built: needs PayU docs.
+// A good hash is not enough: src/ordering.js also asks PayU server to server (src/payuverify.js) and marks PAID only on success with the right amount.

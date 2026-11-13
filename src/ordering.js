@@ -412,6 +412,8 @@ export function createOrderingHandler(deps = {}) {
       if (r.ok && !r.duplicate && deps.pushToRista && ctx && ctx.waitUntil) ctx.waitUntil(Promise.resolve(deps.pushToRista(env, { orderId: order.id, method: 'payu' })).catch((e) => console.error('rista push failed', String(e && e.message).slice(0, 120))));
       return { handled: true, order, result: r.ok ? 'paid' : r.code };
     }
+    // PayU can post status=pending. That is not a failure: money may still arrive. Leave the order waiting; expiry and the daily check ask PayU later.
+    if (vr.status === 'pending') return { handled: true, order, result: 'pending' };
     // failure or cancel: only an order still waiting for payment can fail
     await transition(db, { orderId: order.id, from: 'PAYMENT_PENDING', to: 'PAYMENT_FAILED', actor, note: `payu ${vr.status}`.slice(0, 40) });
     return { handled: true, order, result: 'failed' };
